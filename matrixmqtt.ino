@@ -47,7 +47,7 @@ int randomPiece;
 int randomPosX;
 int lastPiece = 8;
 bool canBePlaced = true;
-int lightMode = 7;
+int lightMode = 8;
 int interruptPin = 2;
 unsigned long previousMillis = 0;
 const long interval = 500;
@@ -58,7 +58,14 @@ String htmlmessage = "<head>";
 String drawHtml ="<html>";
 String jsonResult = "";
 int drawColor[3] = {255,255,255};
-int connection = 1;
+int connection = 0;
+
+// Variables for ltc
+int lastLTCprice = 0;
+int LTCInSEK = 0;
+int LTCInK = 0;
+int LTCInH = 0;
+bool priceRise = true;
 
 // Using the neopixel library, create a pixel object with the settings specified
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
@@ -126,6 +133,12 @@ void callback(char* topic, byte* payload, unsigned int length)
       Serial.println(matrixMode);
       clearAll();
     }
+    else if (matrixMode == "LTC")
+    {
+      lightMode = 8;
+      Serial.println(matrixMode);
+      clearAll();
+    }
   }
 }
 
@@ -159,6 +172,9 @@ void cycleLightMode()
       case 7:
          nightClock();
          break;
+      case 8:
+         displayLTC();
+         break;   
       default:
         clearAll();
     }
@@ -473,7 +489,7 @@ void nightClock()
 // and with the given color
 // </summary>
 // <param name="number"  type="int" values="0-9">Number to display</param>
-// <param name="number"  type="int" values="0-99">Where to start printing the number, starting from the most down-left pixel</param>
+// <param name="startingPoint"  type="int" values="0-99">Where to start printing the number, starting from the most down-left pixel</param>
 // <param name="r" type="int" values="0-255">The amount of red in the number</param>
 // <param name="g" type="int" values="0-255">The amount of green in the number</param>
 // <param name="b" type="int" values="0-255">The amount of blue in the number</param>
@@ -705,6 +721,85 @@ void printPW(int r, int g, int b)
   }
 }
 
+void displayLTC(){
+  unsigned long currentClockMillis = millis();
+  if (currentClockMillis - clockMillis >= clockUpdateInterval) 
+  {
+      clockMillis = currentClockMillis;
+      GetLTCInSek();
+      delay(50);
+      if (LTCInSEK == 0 || LTCInK == 0)
+      {
+        lightMode = 7;
+      }
+      delay(200);
+      for (int i = 0; i < 4; ++i)
+      {
+        printNumber(10,numberOffsets[i],0,0,0);
+      }
+
+      if (LTCInSEK > lastLTCprice)
+      {
+        Serial.println("Green");
+        printNumber(LTCInK,numberOffsets[0],0,255,0);
+        printNumber(LTCInH,numberOffsets[1],0,255,0);
+      }
+      else
+      {
+        Serial.println("Red");
+        printNumber(LTCInK,numberOffsets[0],255,0,0);
+        printNumber(LTCInH,numberOffsets[1],255,0,0);
+      }
+
+      int myLtcK = (LTCInSEK * 3.0385)/1000;
+      int myLtcH = ((LTCInSEK * 3.0385) - (myLtcK * 1000))/100;
+
+      if (myLtcK >= 10)
+      {
+        int myLtcK1 = myLtcK/10;
+        int myLtcK2 = myLtcK%10;
+        printNumber(myLtcK,numberOffsets[2],100,100,100);
+        printNumber(myLtcH,numberOffsets[3],100,100,100);
+        pixels.setPixelColor(4, pixels.Color(0,0,0));
+      }
+      else
+      {
+        printNumber(myLtcK,numberOffsets[2],100,100,100);
+        printNumber(myLtcH,numberOffsets[3],100,100,100);
+        pixels.setPixelColor(4, pixels.Color(0,0,100));
+      }
+      pixels.setPixelColor(54, pixels.Color(0,0,100));
+      pixels.show();
+  }  
+}
+
+void GetLTCInSek(){
+  if (WiFi.status() == WL_CONNECTED) 
+  {
+    HTTPClient http;  
+    http.begin("http://192.168.2.247:55107/api/values"); 
+    int httpCode = http.GET();   
+    Serial.println(httpCode);                                                       
+
+    if (httpCode > 0) 
+    { 
+      String payload = http.getString();                  
+      LTCInK = payload.substring(2,3).toInt();
+      LTCInH = payload.substring(3,4).toInt();
+      if (payload.substring(2,6).toInt() != lastLTCprice)
+      {
+        lastLTCprice = LTCInSEK;
+        LTCInSEK = payload.substring(2,6).toInt();      
+      }  
+      Serial.println(payload);
+      Serial.println(LTCInSEK);
+      Serial.println(LTCInK);
+      Serial.println(LTCInH);
+    }
+    http.end();  
+  }
+}
+
 void checkMQTTForUpdate(int inMode){
   client.loop();
   if (inMode != lightMode)
@@ -729,6 +824,7 @@ void setup(void){
     delay(500);
     Serial.print(".");
     pixels.setPixelColor(connection, pixels.Color(100,100,100));
+    pixels.show();
     connection++;
   }
   Serial.println("");
